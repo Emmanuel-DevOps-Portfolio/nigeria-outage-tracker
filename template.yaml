@@ -1,0 +1,173 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Nigeria Power Outage Tracker - Serverless AWS Application
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: python3.12
+    Environment:
+      Variables:
+        TABLE_NAME: OutageEvents
+        ALERT_THRESHOLD: "5"
+        ALERT_TOPIC_ARN: arn:aws:sns:eu-west-1:941377151096:nigeria-outage-alerts
+
+Resources:
+  OutageEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: OutageEvents
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: state
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: StateIndex
+          KeySchema:
+            - AttributeName: state
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+
+  OutageTrackerApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - POST
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: outage-ingest
+      CodeUri: src/ingest/
+      Handler: handler.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: OutageEvents
+      Events:
+        SubmitReport:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref OutageTrackerApi
+            Path: /reports
+            Method: POST
+
+  QueryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: outage-query
+      CodeUri: src/query/
+      Handler: handler.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: OutageEvents
+      Events:
+        GetAllReports:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref OutageTrackerApi
+            Path: /reports
+            Method: GET
+        GetReportsByLGA:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref OutageTrackerApi
+            Path: /reports/{lga}
+            Method: GET
+
+  AggregatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: outage-aggregator
+      CodeUri: src/aggregator/
+      Handler: handler.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: OutageEvents
+      Events:
+        DynamoDBStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt OutageEventsTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 10
+            Enabled: true
+
+  AlertFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: outage-alert
+      CodeUri: src/alert/
+      Handler: handler.lambda_handler
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: nigeria-outage-alerts
+      Events:
+        AlertApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref OutageTrackerApi
+            Path: /alert
+            Method: POST
+
+Outputs:
+  OutageTrackerApi:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${OutageTrackerApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+
+  IngestFunction:
+    Description: Ingest Lambda function ARN
+    Value: !GetAtt IngestFunction.Arn
+
+  QueryFunction:
+    Description: Query Lambda function ARN
+    Value: !GetAtt QueryFunction.Arn
+
+  AggregatorFunction:
+    Description: Aggregator Lambda function ARN
+    Value: !GetAtt AggregatorFunction.Arn
+
+  AlertFunction:
+    Description: Alert Lambda function ARN
+    Value: !GetAtt AlertFunction.Arn
+
+  OutageEventsTable:
+    Description: DynamoDB table name
+    Value: !Ref OutageEventsTable

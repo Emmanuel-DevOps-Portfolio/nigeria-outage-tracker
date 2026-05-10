@@ -1,0 +1,19 @@
+# SAM build artifacts
+.aws-sam/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Environment
+.env
+*.env
+
+# AWS credentials
+.aws/
+
+# OS
+.DS_Store
+Thumbs.db
