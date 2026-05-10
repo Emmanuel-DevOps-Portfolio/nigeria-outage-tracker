@@ -8,10 +8,12 @@ from decimal import Decimal
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ['TABLE_NAME'])
 threshold = int(os.environ['ALERT_THRESHOLD'])
+lambda_client = boto3.client('lambda')
 
 def lambda_handler(event, context):
     try:
         records = event.get('Records', [])
+        print(f"Records received: {len(records)}")
 
         if not records:
             return {
@@ -22,6 +24,7 @@ def lambda_handler(event, context):
         record = records[0]
         new_image = record.get('dynamodb', {}).get('NewImage', {})
         lga = new_image.get('lga', {}).get('S', '')
+        print(f"LGA detected: {lga}")
 
         if not lga:
             return {
@@ -30,6 +33,7 @@ def lambda_handler(event, context):
             }
 
         two_hours_ago = (datetime.utcnow() - timedelta(hours=2)).isoformat()
+        print(f"Querying from: {two_hours_ago}")
 
         response = table.query(
             KeyConditionExpression=Key('PK').eq(f'LGA#{lga}') &
@@ -40,6 +44,7 @@ def lambda_handler(event, context):
         )
 
         report_count = len(response['Items'])
+        print(f"Report count for {lga}: {report_count} | Threshold: {threshold}")
 
         alert_message = (
             f"OUTAGE ALERT: {report_count} reports received from "
@@ -49,6 +54,16 @@ def lambda_handler(event, context):
         )
 
         if report_count >= threshold:
+            print(f"Threshold hit! Invoking Alert Lambda for {lga}")
+            lambda_client.invoke(
+                FunctionName='outage-alert',
+                InvocationType='Event',
+                Payload=json.dumps({
+                    'lga': lga,
+                    'report_count': report_count,
+                    'alert_message': alert_message
+                })
+            )
             return {
                 'statusCode': 200,
                 'body': json.dumps({
@@ -59,6 +74,7 @@ def lambda_handler(event, context):
                 })
             }
         else:
+            print(f"Threshold not hit. {report_count} of {threshold} required.")
             return {
                 'statusCode': 200,
                 'body': json.dumps({
@@ -70,6 +86,7 @@ def lambda_handler(event, context):
             }
 
     except Exception as e:
+        print(f"ERROR: {str(e)}")
         return {
             'statusCode': 500,
             'body': json.dumps({'error': str(e)})
