@@ -68,6 +68,58 @@ curl <API_URL>/reports
 ## 💰 Cost
 Runs on AWS free tier and pay-per-use pricing. At civic app scale, costs under $2/month.
 
+
+## 🏗️ Terraform Version
+
+A full Terraform IaC version is available in the `terraform/` folder — same architecture, different deployment approach.
+
+### Module structure
+
+terraform/
+
+├── modules/
+
+│   ├── api/           # API Gateway HTTP API
+
+│   ├── compute/       # Lambda functions + IAM roles
+
+│   ├── messaging/     # SQS queue, DLQ, SNS topic
+
+│   ├── observability/ # CloudWatch logs, alarms, dashboard
+
+│   └── storage/       # DynamoDB table with GSI and TTL
+
+├── functions/         # Python Lambda handlers
+
+└── environments/
+
+└── dev/           # Root module wiring everything together
+
+### Deploy with Terraform
+
+```bash
+cd terraform/environments/dev
+export TF_VAR_alert_email="your@email.com"
+terraform init
+terraform plan
+terraform apply
+```
+
+### SAM vs Terraform
+
+| Feature | SAM | Terraform |
+|---|---|---|
+| IaC tool | AWS SAM | Terraform |
+| State management | CloudFormation | S3 backend with native locking |
+| Module structure | Single template | 5 independent reusable modules |
+| CloudWatch dashboard | No | Yes |
+| Dead Letter Queue | No | Yes |
+| Alert threshold | Hardcoded | Configurable variable |
+
+
+
+
+
 ## 👨🏾‍💻 Author
 **Emmanuel Ulu** — DevOps/Cloud Engineer | AWS Community Builder 2026
 - GitHub: [Emmanuel-DevOps-Portfolio](https://github.com/Emmanuel-DevOps-Portfolio)
